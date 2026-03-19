@@ -1,90 +1,44 @@
-# Game Show Overlay Starter v2
+# Game Show Overlay v4
 
-A Netlify + React + Ably starter for controlling 10 guest lower-thirds in live streams.
+Netlify + Ably starter for 10 guest overlays with a host control page and separate guest answer pages.
 
-## What changed in v2
+## What's new in v4
+- Host controls the display label, color, reveal timing, and visibility.
+- Guests submit answers from `/guest/1` through `/guest/10`.
+- Host sees submitted-answer indicators and pending answers.
+- `Show / Update` moves the latest guest submission to the on-air overlay.
+- Color picker plus preset swatches.
+- Quick YES / NO buttons remain on the control page.
 
-- bigger game-show style control page
-- selected-guest control panel
-- live preview panel
-- hotkeys for fast reveals during the show
-- quick-answer buttons for THIS / THAT / YES / NO
-- selected card highlight so you can see who you are working on
+## Routes
+- `/` → host control page
+- `/overlay/1` ... `/overlay/10` → browser source overlays
+- `/guest/1` ... `/guest/10` → guest answer pages
 
-## What it does
-
-- `/` = control dashboard
-- `/overlay/1` through `/overlay/10` = guest overlay pages
-- secure-ish starter auth flow using a Netlify Function to mint Ably token requests
-- per-guest label, answer text, theme, show/hide, and clear
-- show all / hide all / clear all buttons
-- keyboard shortcuts for live operation
-
-## Hotkeys
-
-These only work when you are not typing in a field.
-
-- `1-9` and `0` = toggle Guest 1-10
-- `Shift + 1-9` and `Shift + 0` = set that guest to `THIS` and show it
-- `Alt + 1-9` and `Alt + 0` = set that guest to `THAT` and show it
-- `R` = reveal all
-- `H` = hide all
-- `Shift + C` = clear all
-
-## Why this setup
-
-Ably recommends token authentication for clients instead of exposing your private API key in the browser. Netlify Functions can securely access runtime environment variables, so the browser asks your function for auth and never sees the secret key.
-
-## Local setup
-
-1. Install dependencies:
-   npm install
-
-2. Create a `.env` file or set a Netlify environment variable:
-   ABLY_API_KEY=your-app-id.key-id:secret
-
-3. Run locally:
-   npm run dev
-
-If you want local Netlify Functions to behave exactly like production, use Netlify CLI.
-
-## Deploy to Netlify
-
-1. Push this folder to GitHub.
-2. Create a new Netlify site from the repo.
-3. In Netlify, add an environment variable named `ABLY_API_KEY`.
-4. Make sure the variable scope includes **Functions**.
+## Netlify setup
+1. Connect the repo to Netlify.
+2. Add `ABLY_API_KEY` in environment variables.
+3. Build command: `npm run build`
+4. Publish directory: `dist`
 5. Deploy.
 
 ## OBS setup
+Add each overlay page as a Browser Source:
+- `https://your-site.netlify.app/overlay/1`
+- ...
+- `https://your-site.netlify.app/overlay/10`
 
-- Add your guest camera as usual.
-- Add a Browser Source above it with the matching overlay URL:
-  - `https://your-site.netlify.app/overlay/1`
-  - `https://your-site.netlify.app/overlay/2`
-  - and so on through `/overlay/10`
-- Recommended browser source size: `1920x1080`
-- The page background is transparent, so it should sit cleanly on top of video.
+Use 1920x1080 for each browser source.
 
-## Step-by-step live workflow
+## Guest workflow
+1. Give each guest their own guest URL.
+2. They enter an answer and submit.
+3. The host sees `Answered` on the control page.
+4. The host clicks `Show / Update` when ready.
 
-1. Open your control page.
-2. Put each guest overlay URL into the matching browser source in OBS.
-3. On the control page, click **Select** on the guest you want to work on.
-4. Type their label and answer, or use the quick buttons for THIS / THAT / YES / NO.
-5. Click **Show / Update** to push that guest live.
-6. During the show, use hotkeys for speed:
-   - press `3` to toggle Guest 3
-   - press `Shift + 3` to instantly make Guest 3 say `THIS`
-   - press `Alt + 3` to instantly make Guest 3 say `THAT`
-7. Use `R` for a big all-at-once reveal.
-8. Use `H` to hide every lower third.
-9. Use `Shift + C` between rounds to clear everybody.
-
-## Easy upgrades next
-
-- password-protect the control page
-- separate name and answer into different overlay layers
-- add score, buzzer state, or timer fields
-- add lock/prep mode so answers can be staged without going live
-- add per-round presets
+## Host hotkeys
+- `1-9` / `0` → select + toggle that guest
+- `Shift + 1-9` / `0` → reveal that guest's latest submitted answer
+- `R` → reveal all latest submitted answers
+- `H` → hide all
+- `Shift + C` → clear everything

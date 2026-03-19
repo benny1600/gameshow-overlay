@@ -3,12 +3,26 @@ import * as Ably from 'ably';
 
 const CHANNEL_NAME = 'gameshow-overlays';
 const GUEST_COUNT = 10;
+const COLOR_PRESETS = [
+  '#2563eb',
+  '#7c3aed',
+  '#db2777',
+  '#dc2626',
+  '#ea580c',
+  '#16a34a',
+  '#0891b2',
+  '#64748b',
+];
+
 const EMPTY_GUESTS = Array.from({ length: GUEST_COUNT }, (_, index) => ({
   id: index + 1,
   label: `Guest ${index + 1}`,
   answer: '',
+  pendingAnswer: '',
+  hasSubmitted: false,
+  submittedAt: null,
   visible: false,
-  theme: 'default',
+  color: COLOR_PRESETS[index % COLOR_PRESETS.length],
 }));
 
 function createClientId(prefix) {
@@ -45,10 +59,28 @@ function useAblyChannel(prefix) {
   }, []);
 
   return {
-    client: clientRef.current,
     channel: channelRef.current,
     connectionState,
   };
+}
+
+function sanitizeGuests(data) {
+  if (!Array.isArray(data)) return EMPTY_GUESTS;
+  return EMPTY_GUESTS.map((fallback, index) => {
+    const source = data[index] || data.find((item) => item?.id === fallback.id) || {};
+    return {
+      ...fallback,
+      ...source,
+      id: fallback.id,
+      color: source.color || fallback.color,
+      pendingAnswer: source.pendingAnswer || '',
+      answer: source.answer || '',
+      label: source.label || fallback.label,
+      hasSubmitted: Boolean(source.hasSubmitted),
+      submittedAt: source.submittedAt || null,
+      visible: Boolean(source.visible),
+    };
+  });
 }
 
 function useOverlayStore(channel) {
@@ -63,20 +95,20 @@ function useOverlayStore(channel) {
         const history = await channel.history({ limit: 1 });
         const latest = history.items[0]?.data;
         if (active && latest?.guests) {
-          setGuests(latest.guests);
+          setGuests(sanitizeGuests(latest.guests));
         }
       } catch {
         // Keep defaults if no history is available yet.
       }
 
       const handleMessage = (message) => {
-        if (message.name === 'overlay-state' && message.data?.guests) {
-          setGuests(message.data.guests);
+        if (message.data?.guests) {
+          setGuests(sanitizeGuests(message.data.guests));
         }
       };
 
-      channel.subscribe('overlay-state', handleMessage);
-      unsubscribe = () => channel.unsubscribe('overlay-state', handleMessage);
+      channel.subscribe(handleMessage);
+      unsubscribe = () => channel.unsubscribe(handleMessage);
     }
 
     setup();
@@ -95,13 +127,41 @@ function keyToGuestId(key) {
   return key === '0' ? 10 : Number(key);
 }
 
+function hexToRgb(hex) {
+  const normalized = hex.replace('#', '');
+  const value = normalized.length === 3
+    ? normalized.split('').map((char) => char + char).join('')
+    : normalized;
+  const number = Number.parseInt(value, 16);
+  return {
+    r: (number >> 16) & 255,
+    g: (number >> 8) & 255,
+    b: number & 255,
+  };
+}
+
+function colorVars(color) {
+  const { r, g, b } = hexToRgb(color || '#2563eb');
+  return {
+    '--accent': color || '#2563eb',
+    '--accent-rgb': `${r}, ${g}, ${b}`,
+  };
+}
+
+function formatTime(timestamp) {
+  if (!timestamp) return 'Waiting';
+  try {
+    return new Date(timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  } catch {
+    return 'Ready';
+  }
+}
+
 function App() {
   const path = window.location.pathname;
 
-  if (path.startsWith('/overlay/')) {
-    return <OverlayPage />;
-  }
-
+  if (path.startsWith('/overlay/')) return <OverlayPage />;
+  if (path.startsWith('/guest/')) return <GuestPage />;
   return <ControlPage />;
 }
 
@@ -118,40 +178,36 @@ function ControlPage() {
   }, [guests]);
 
   const publishState = useCallback(async (nextGuests, message = 'Updated.') => {
-    setGuests(nextGuests);
-    guestsRef.current = nextGuests;
-    await channel.publish('overlay-state', { guests: nextGuests, updatedAt: Date.now() });
+    const safeGuests = sanitizeGuests(nextGuests);
+    setGuests(safeGuests);
+    guestsRef.current = safeGuests;
+    await channel.publish('overlay-state', { guests: safeGuests, updatedAt: Date.now() });
     setStatusText(message);
   }, [channel, setGuests]);
 
-  const updateGuest = useCallback((guestId, patch) => {
-    setGuests((current) =>
-      current.map((guest) => (guest.id === guestId ? { ...guest, ...patch } : guest))
-    );
+  const updateGuestLocal = useCallback((guestId, patch) => {
+    setGuests((current) => current.map((guest) => (
+      guest.id === guestId ? { ...guest, ...patch } : guest
+    )));
   }, [setGuests]);
 
   const patchAndPublishGuest = useCallback(async (guestId, patch, message) => {
-    const nextGuests = guestsRef.current.map((guest) =>
+    const nextGuests = guestsRef.current.map((guest) => (
       guest.id === guestId ? { ...guest, ...patch } : guest
-    );
+    ));
     await publishState(nextGuests, message);
   }, [publishState]);
 
-  const currentOverlayBase = useMemo(() => window.location.origin, []);
   const selectedGuest = guests.find((guest) => guest.id === selectedGuestId) || guests[0];
+  const currentOrigin = useMemo(() => window.location.origin, []);
+  const submittedCount = guests.filter((guest) => guest.hasSubmitted).length;
 
   useEffect(() => {
     const handleKeyDown = async (event) => {
       if (!hotkeysEnabled) return;
-
       const target = event.target;
       const tagName = target?.tagName?.toLowerCase();
-      const isEditable =
-        tagName === 'input' ||
-        tagName === 'textarea' ||
-        tagName === 'select' ||
-        target?.isContentEditable;
-
+      const isEditable = ['input', 'textarea', 'select'].includes(tagName) || target?.isContentEditable;
       if (isEditable) return;
 
       const guestId = keyToGuestId(event.key);
@@ -159,28 +215,21 @@ function ControlPage() {
         event.preventDefault();
         const guest = guestsRef.current.find((item) => item.id === guestId);
         if (!guest) return;
+        setSelectedGuestId(guestId);
 
         if (event.shiftKey) {
-          setSelectedGuestId(guestId);
           await patchAndPublishGuest(
             guestId,
-            { answer: 'THIS', theme: 'this', visible: true },
-            `${guest.label} set to THIS.`
+            {
+              answer: guest.pendingAnswer || guest.answer,
+              visible: true,
+              hasSubmitted: false,
+            },
+            `${guest.label} revealed.`
           );
           return;
         }
 
-        if (event.altKey) {
-          setSelectedGuestId(guestId);
-          await patchAndPublishGuest(
-            guestId,
-            { answer: 'THAT', theme: 'that', visible: true },
-            `${guest.label} set to THAT.`
-          );
-          return;
-        }
-
-        setSelectedGuestId(guestId);
         await patchAndPublishGuest(
           guestId,
           { visible: !guest.visible },
@@ -190,17 +239,21 @@ function ControlPage() {
       }
 
       const key = event.key.toLowerCase();
-
-      if (key === 'r' && !event.shiftKey && !event.altKey && !event.metaKey && !event.ctrlKey) {
+      if (key === 'r' && !event.metaKey && !event.ctrlKey && !event.altKey) {
         event.preventDefault();
         await publishState(
-          guestsRef.current.map((guest) => ({ ...guest, visible: true })),
+          guestsRef.current.map((guest) => ({
+            ...guest,
+            answer: guest.pendingAnswer || guest.answer,
+            visible: true,
+            hasSubmitted: false,
+          })),
           'All lower-thirds shown.'
         );
         return;
       }
 
-      if (key === 'h' && !event.shiftKey && !event.altKey && !event.metaKey && !event.ctrlKey) {
+      if (key === 'h' && !event.metaKey && !event.ctrlKey && !event.altKey) {
         event.preventDefault();
         await publishState(
           guestsRef.current.map((guest) => ({ ...guest, visible: false })),
@@ -209,13 +262,19 @@ function ControlPage() {
         return;
       }
 
-      if (key === 'c' && event.shiftKey && !event.altKey && !event.metaKey && !event.ctrlKey) {
+      if (key === 'c' && event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
         event.preventDefault();
         await publishState(
-          guestsRef.current.map((guest) => ({ ...guest, answer: '', visible: false })),
-          'All lower-thirds cleared.'
+          guestsRef.current.map((guest) => ({
+            ...guest,
+            answer: '',
+            pendingAnswer: '',
+            visible: false,
+            hasSubmitted: false,
+            submittedAt: null,
+          })),
+          'All guests cleared.'
         );
-        return;
       }
     };
 
@@ -228,62 +287,63 @@ function ControlPage() {
       <header className="hero">
         <div>
           <p className="eyebrow">Game Show Overlay Control</p>
-          <h1>This or That lower-thirds v2</h1>
+          <h1>Guest answers + host reveal</h1>
           <p className="hero-copy">
-            Run 10 guest overlays from one control page. Type in answers ahead of time, reveal them
-            live, or use hotkeys for fast game-show timing.
+            Guests submit their own answers from private guest links. You control the display label,
+            see who has answered, and decide when each answer goes live on stream.
           </p>
         </div>
         <div className="hero-panel">
           <div className={`pill ${connectionState}`}>Ably: {connectionState}</div>
-          <div className="pill">Channel: {CHANNEL_NAME}</div>
+          <div className="pill">Answers in: {submittedCount}/{GUEST_COUNT}</div>
           <div className="status-line">{statusText}</div>
         </div>
       </header>
 
-      <section className="top-grid">
-        <div className="card stage-panel">
+      <section className="top-grid control-grid">
+        <div className="card stage-panel" style={colorVars(selectedGuest?.color)}>
           <div className="panel-header">
             <div>
               <p className="eyebrow compact">Selected guest</p>
               <h2>{selectedGuest?.label}</h2>
+              <p className="subtle-copy">Guest page shows this label before they submit.</p>
             </div>
             <span className={`visibility ${selectedGuest?.visible ? 'live' : 'hidden'}`}>
               {selectedGuest?.visible ? 'LIVE' : 'HIDDEN'}
             </span>
           </div>
 
-          <div className="stage-actions">
-            <button onClick={() => patchAndPublishGuest(selectedGuestId, { visible: true }, `${selectedGuest.label} shown.`)}>
-              Show selected
+          <div className="preview-box accent-box">
+            <div className={`overlay-card preview-card ${selectedGuest?.visible ? 'visible' : 'hidden'}`} style={colorVars(selectedGuest?.color)}>
+              <div className="overlay-topline">{selectedGuest?.label}</div>
+              <div className="overlay-answer">{selectedGuest?.answer || 'Awaiting reveal'}</div>
+            </div>
+          </div>
+
+          <div className="stage-actions split-actions">
+            <button onClick={() => patchAndPublishGuest(selectedGuestId, { answer: selectedGuest.pendingAnswer || selectedGuest.answer, visible: true, hasSubmitted: false }, `${selectedGuest.label} shown.`)}>
+              Show / Update selected
             </button>
             <button className="secondary" onClick={() => patchAndPublishGuest(selectedGuestId, { visible: false }, `${selectedGuest.label} hidden.`)}>
-              Hide selected
+              Hide
             </button>
-            <button className="secondary" onClick={() => patchAndPublishGuest(selectedGuestId, { answer: '', visible: false }, `${selectedGuest.label} cleared.`)}>
-              Clear selected
-            </button>
-          </div>
-
-          <div className="quick-answer-row">
-            <button className="quick this" onClick={() => patchAndPublishGuest(selectedGuestId, { answer: 'THIS', theme: 'this', visible: true }, `${selectedGuest.label} set to THIS.`)}>
-              THIS
-            </button>
-            <button className="quick that" onClick={() => patchAndPublishGuest(selectedGuestId, { answer: 'THAT', theme: 'that', visible: true }, `${selectedGuest.label} set to THAT.`)}>
-              THAT
-            </button>
-            <button className="quick yes" onClick={() => patchAndPublishGuest(selectedGuestId, { answer: 'YES', theme: 'yes', visible: true }, `${selectedGuest.label} set to YES.`)}>
-              YES
-            </button>
-            <button className="quick no" onClick={() => patchAndPublishGuest(selectedGuestId, { answer: 'NO', theme: 'no', visible: true }, `${selectedGuest.label} set to NO.`)}>
-              NO
+            <button className="secondary" onClick={() => patchAndPublishGuest(selectedGuestId, { answer: '', pendingAnswer: '', visible: false, hasSubmitted: false, submittedAt: null }, `${selectedGuest.label} cleared.`)}>
+              Clear
             </button>
           </div>
 
-          <div className={`preview-box theme-${selectedGuest?.theme || 'default'}`}>
-            <div className={`overlay-card preview-card ${selectedGuest?.visible ? 'visible' : 'hidden'}`}>
-              <div className="overlay-topline">{selectedGuest?.label}</div>
-              <div className="overlay-answer">{selectedGuest?.answer || 'Awaiting answer'}</div>
+          <div className="mini-status-grid">
+            <div className="mini-card">
+              <span>Pending answer</span>
+              <strong>{selectedGuest?.pendingAnswer || 'No answer yet'}</strong>
+            </div>
+            <div className="mini-card">
+              <span>Submitted</span>
+              <strong>{selectedGuest?.hasSubmitted ? `Yes • ${formatTime(selectedGuest?.submittedAt)}` : 'No'}</strong>
+            </div>
+            <div className="mini-card">
+              <span>Guest link</span>
+              <strong>{`${currentOrigin}/guest/${selectedGuestId}`}</strong>
             </div>
           </div>
         </div>
@@ -291,81 +351,51 @@ function ControlPage() {
         <div className="card hotkey-panel">
           <div className="panel-header">
             <div>
-              <p className="eyebrow compact">Operator hotkeys</p>
-              <h2>Live shortcuts</h2>
+              <p className="eyebrow compact">Operator tools</p>
+              <h2>Fast reveal controls</h2>
             </div>
             <label className="toggle-row">
-              <input
-                type="checkbox"
-                checked={hotkeysEnabled}
-                onChange={(event) => setHotkeysEnabled(event.target.checked)}
-              />
+              <input type="checkbox" checked={hotkeysEnabled} onChange={(event) => setHotkeysEnabled(event.target.checked)} />
               <span>Enable hotkeys</span>
             </label>
           </div>
 
-          <div className="hotkey-list">
-            <div><kbd>1-9</kbd> <kbd>0</kbd><span>Toggle guest visibility</span></div>
-            <div><kbd>Shift</kbd> + <kbd>1-9</kbd> / <kbd>0</kbd><span>Set that guest to THIS and show it</span></div>
-            <div><kbd>Alt</kbd> + <kbd>1-9</kbd> / <kbd>0</kbd><span>Set that guest to THAT and show it</span></div>
-            <div><kbd>R</kbd><span>Reveal all</span></div>
-            <div><kbd>H</kbd><span>Hide all</span></div>
-            <div><kbd>Shift</kbd> + <kbd>C</kbd><span>Clear all</span></div>
+          <div className="hotkey-list compact-list">
+            <div><kbd>1-9</kbd> <kbd>0</kbd><span>Select + toggle that guest</span></div>
+            <div><kbd>Shift</kbd> + <kbd>1-9</kbd> / <kbd>0</kbd><span>Reveal that guest’s latest submitted answer</span></div>
+            <div><kbd>R</kbd><span>Reveal all latest submitted answers</span></div>
+            <div><kbd>H</kbd><span>Hide all overlays</span></div>
+            <div><kbd>Shift</kbd> + <kbd>C</kbd><span>Clear all submitted + shown answers</span></div>
+          </div>
+
+          <div className="quick-answer-row">
+            <button className="quick yes" onClick={() => patchAndPublishGuest(selectedGuestId, { pendingAnswer: 'YES', hasSubmitted: true, submittedAt: Date.now() }, `${selectedGuest.label} marked YES.`)}>YES</button>
+            <button className="quick no" onClick={() => patchAndPublishGuest(selectedGuestId, { pendingAnswer: 'NO', hasSubmitted: true, submittedAt: Date.now() }, `${selectedGuest.label} marked NO.`)}>NO</button>
           </div>
 
           <div className="note-box">
-            Hotkeys only fire when you are <strong>not typing in an input box</strong>. That keeps
-            you from accidentally triggering overlays while editing names or answers.
+            Guests only edit their own answer field on <strong>/guest/1</strong> through <strong>/guest/10</strong>.
+            Your control page handles labels, color, reveal timing, and on-air visibility.
           </div>
         </div>
       </section>
 
       <section className="toolbar card">
-        <button
-          onClick={() =>
-            publishState(
-              guests.map((guest) => ({ ...guest, visible: true })),
-              'All lower-thirds shown.'
-            )
-          }
-        >
-          Show all
-        </button>
-        <button
-          onClick={() =>
-            publishState(
-              guests.map((guest) => ({ ...guest, visible: false })),
-              'All lower-thirds hidden.'
-            )
-          }
-        >
-          Hide all
-        </button>
-        <button
-          onClick={() =>
-            publishState(
-              guests.map((guest) => ({ ...guest, answer: '', visible: false })),
-              'All lower-thirds cleared.'
-            )
-          }
-        >
-          Clear all
-        </button>
+        <button onClick={() => publishState(guests.map((guest) => ({ ...guest, answer: guest.pendingAnswer || guest.answer, visible: true, hasSubmitted: false })), 'All lower-thirds shown.')}>Show all latest answers</button>
+        <button onClick={() => publishState(guests.map((guest) => ({ ...guest, visible: false })), 'All lower-thirds hidden.')}>Hide all</button>
+        <button onClick={() => publishState(guests.map((guest) => ({ ...guest, answer: '', pendingAnswer: '', visible: false, hasSubmitted: false, submittedAt: null })), 'All guests cleared.')}>Clear all</button>
       </section>
 
       <section className="grid-list">
         {guests.map((guest) => (
-          <article
-            className={`card guest-card ${selectedGuestId === guest.id ? 'selected' : ''}`}
-            key={guest.id}
-          >
+          <article className={`card guest-card ${selectedGuestId === guest.id ? 'selected' : ''}`} key={guest.id} style={colorVars(guest.color)}>
             <div className="guest-card-header">
               <div>
                 <h2>{guest.label}</h2>
-                <p className="slot-label">Hotkey: {guest.id === 10 ? '0' : guest.id}</p>
+                <p className="slot-label">Guest {guest.id} • Hotkey {guest.id === 10 ? '0' : guest.id}</p>
               </div>
-              <span className={`visibility ${guest.visible ? 'live' : 'hidden'}`}>
-                {guest.visible ? 'LIVE' : 'HIDDEN'}
+              <span className={`answer-indicator ${guest.hasSubmitted ? 'ready' : 'waiting'}`}>
+                {guest.hasSubmitted ? 'Answered' : 'Waiting'}
               </span>
             </div>
 
@@ -375,83 +405,36 @@ function ControlPage() {
 
             <label>
               Display label
-              <input
-                type="text"
-                value={guest.label}
-                onChange={(event) => updateGuest(guest.id, { label: event.target.value })}
-              />
+              <input type="text" value={guest.label} onChange={(event) => updateGuestLocal(guest.id, { label: event.target.value })} onBlur={() => patchAndPublishGuest(guest.id, { label: guestsRef.current.find((item) => item.id === guest.id)?.label || guest.label }, `${guest.label} label updated.`)} />
             </label>
 
-            <label>
-              Answer text
-              <input
-                type="text"
-                value={guest.answer}
-                onChange={(event) => updateGuest(guest.id, { answer: event.target.value })}
-                placeholder="THIS, THAT, YES, NO..."
-              />
-            </label>
-
-            <label>
-              Theme
-              <select
-                value={guest.theme}
-                onChange={(event) => updateGuest(guest.id, { theme: event.target.value })}
-              >
-                <option value="default">Default</option>
-                <option value="this">This</option>
-                <option value="that">That</option>
-                <option value="yes">Yes</option>
-                <option value="no">No</option>
-              </select>
-            </label>
-
-            <div className="button-row">
-              <button
-                onClick={() =>
-                  publishState(
-                    guests.map((item) =>
-                      item.id === guest.id ? { ...guest, visible: true } : item
-                    ),
-                    `${guest.label} shown.`
-                  )
-                }
-              >
-                Show / Update
-              </button>
-              <button
-                className="secondary"
-                onClick={() =>
-                  publishState(
-                    guests.map((item) =>
-                      item.id === guest.id ? { ...guest, visible: false } : item
-                    ),
-                    `${guest.label} hidden.`
-                  )
-                }
-              >
-                Hide
-              </button>
-              <button
-                className="secondary"
-                onClick={() =>
-                  publishState(
-                    guests.map((item) =>
-                      item.id === guest.id
-                        ? { ...guest, answer: '', visible: false }
-                        : item
-                    ),
-                    `${guest.label} cleared.`
-                  )
-                }
-              >
-                Clear
-              </button>
+            <div className="field-group">
+              <label>
+                Accent color
+                <input type="color" value={guest.color} onChange={(event) => updateGuestLocal(guest.id, { color: event.target.value })} onBlur={() => patchAndPublishGuest(guest.id, { color: guestsRef.current.find((item) => item.id === guest.id)?.color || guest.color }, `${guest.label} color updated.`)} className="color-input" />
+              </label>
+              <div className="color-palette">
+                {COLOR_PRESETS.map((color) => (
+                  <button key={color} className={`swatch ${guest.color === color ? 'active' : ''}`} style={{ background: color }} onClick={() => patchAndPublishGuest(guest.id, { color }, `${guest.label} color updated.`)} aria-label={`Set color ${color}`} />
+                ))}
+              </div>
             </div>
 
-            <div className="overlay-url">
-              <span>Overlay URL:</span>
-              <code>{`${currentOverlayBase}/overlay/${guest.id}`}</code>
+            <div className="status-stack">
+              <div className="status-pill"><span>Submitted</span><strong>{guest.hasSubmitted ? formatTime(guest.submittedAt) : 'No'}</strong></div>
+              <div className="status-pill"><span>Pending</span><strong>{guest.pendingAnswer || '—'}</strong></div>
+              <div className="status-pill"><span>On air</span><strong>{guest.answer || '—'}</strong></div>
+            </div>
+
+            <div className="button-row">
+              <button onClick={() => patchAndPublishGuest(guest.id, { answer: guest.pendingAnswer || guest.answer, visible: true, hasSubmitted: false }, `${guest.label} shown.`)}>Show / Update</button>
+              <button className="secondary" onClick={() => patchAndPublishGuest(guest.id, { visible: false }, `${guest.label} hidden.`)}>Hide</button>
+              <button className="secondary" onClick={() => patchAndPublishGuest(guest.id, { pendingAnswer: '', answer: '', visible: false, hasSubmitted: false, submittedAt: null }, `${guest.label} cleared.`)}>Clear</button>
+            </div>
+
+            <div className="link-stack">
+              <div className="overlay-url"><span>Overlay:</span><code>{`${currentOrigin}/overlay/${guest.id}`}</code></div>
+              <div className="overlay-url"><span>Guest page:</span><code>{`${currentOrigin}/guest/${guest.id}`}</code></div>
             </div>
           </article>
         ))}
@@ -460,19 +443,87 @@ function ControlPage() {
   );
 }
 
-function OverlayPage() {
+function GuestPage() {
   const guestId = Number(window.location.pathname.split('/').pop() || '1');
-  const { channel, connectionState } = useAblyChannel(`overlay-${guestId}`);
-  const [guests] = useOverlayStore(channel);
-  const guest = guests.find((item) => item.id === guestId) || EMPTY_GUESTS[guestId - 1];
+  const safeGuestId = Math.min(Math.max(guestId, 1), GUEST_COUNT);
+  const { channel, connectionState } = useAblyChannel(`guest-${safeGuestId}`);
+  const [guests, setGuests] = useOverlayStore(channel);
+  const [draftAnswer, setDraftAnswer] = useState('');
+  const [statusText, setStatusText] = useState('Enter your answer and submit when ready.');
+  const guest = guests.find((item) => item.id === safeGuestId) || EMPTY_GUESTS[safeGuestId - 1];
+
+  useEffect(() => {
+    setDraftAnswer(guest.pendingAnswer || '');
+  }, [guest.pendingAnswer, guest.id]);
+
+  const submitAnswer = async () => {
+    const trimmed = draftAnswer.trim();
+    const nextGuests = guests.map((item) => (
+      item.id === safeGuestId
+        ? {
+            ...item,
+            pendingAnswer: trimmed,
+            hasSubmitted: trimmed.length > 0,
+            submittedAt: trimmed.length > 0 ? Date.now() : null,
+          }
+        : item
+    ));
+
+    setGuests(nextGuests);
+    await channel.publish('guest-answer', { guests: nextGuests, updatedAt: Date.now() });
+    setStatusText(trimmed ? 'Answer submitted. Waiting for host reveal.' : 'Answer cleared.');
+  };
 
   return (
-    <div className={`overlay-frame theme-${guest.theme}`}>
+    <div className="guest-shell" style={colorVars(guest.color)}>
+      <div className="guest-card-page card">
+        <p className="eyebrow">Guest answer page</p>
+        <h1>{guest.label}</h1>
+        <p className="hero-copy narrow-copy">
+          Enter your answer below, then hit submit. The host will see your answer and decide when it appears on stream.
+        </p>
+
+        <div className="guest-status-row">
+          <span className={`answer-indicator ${guest.hasSubmitted ? 'ready' : 'waiting'}`}>
+            {guest.hasSubmitted ? 'Submitted' : 'Not submitted'}
+          </span>
+          <span className={`pill ${connectionState}`}>Ably: {connectionState}</span>
+        </div>
+
+        <label>
+          Your answer
+          <input type="text" value={draftAnswer} onChange={(event) => setDraftAnswer(event.target.value)} placeholder="Type your answer here" maxLength={120} />
+        </label>
+
+        <div className="button-row">
+          <button onClick={submitAnswer}>Submit answer</button>
+          <button className="secondary" onClick={() => setDraftAnswer('')}>Clear field</button>
+        </div>
+
+        <div className="note-box guest-note">
+          <strong>Current display label:</strong> {guest.label}
+          <br />
+          <strong>Last submitted answer:</strong> {guest.pendingAnswer || 'None yet'}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function OverlayPage() {
+  const guestId = Number(window.location.pathname.split('/').pop() || '1');
+  const safeGuestId = Math.min(Math.max(guestId, 1), GUEST_COUNT);
+  const { channel, connectionState } = useAblyChannel(`overlay-${safeGuestId}`);
+  const [guests] = useOverlayStore(channel);
+  const guest = guests.find((item) => item.id === safeGuestId) || EMPTY_GUESTS[safeGuestId - 1];
+
+  return (
+    <div className="overlay-frame" style={colorVars(guest.color)}>
       <div className={`overlay-card ${guest.visible ? 'visible' : 'hidden'}`}>
         <div className="overlay-topline">{guest.label}</div>
         <div className="overlay-answer">{guest.answer || ' '}</div>
       </div>
-      <div className="overlay-meta">Guest {guestId} • {connectionState}</div>
+      <div className="overlay-meta">Guest {safeGuestId} • {connectionState}</div>
     </div>
   );
 }
