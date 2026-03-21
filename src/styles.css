@@ -6,24 +6,183 @@
   --accent-rgb: 37, 99, 235;
 }
 
-body { margin: 0; color: #f5f7ff; background: transparent; }
+* {
+  box-sizing: border-box;
+}
 
-/* Default background ONLY for non-overlay pages */
+body {
+  margin: 0;
+  color: #f5f7ff;
+  background: transparent;
+}
+
+button, input, select {
+  font: inherit;
+}
+
+/* =========================
+   APP BACKGROUND (CONTROL + GUEST ONLY)
+========================= */
+
 .app-shell,
 .guest-shell {
   min-height: 100vh;
   padding: 24px;
   background:
-    radial-gradient(circle at top left, rgba(var(--accent-rgb), 0.22), transparent 32%),
-    radial-gradient(circle at top right, rgba(236, 72, 153, 0.16), transparent 28%),
+    radial-gradient(circle at top left, rgba(var(--accent-rgb), 0.25), transparent 35%),
+    radial-gradient(circle at top right, rgba(236, 72, 153, 0.18), transparent 30%),
     #0a0b11;
 }
 
-/* 🔥 FORCE TRANSPARENCY FOR OVERLAY */
+/* =========================
+   CARDS
+========================= */
+
+.card {
+  background: rgba(20, 22, 35, 0.85);
+  border-radius: 16px;
+  padding: 20px;
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,0.08);
+}
+
+/* =========================
+   BUTTONS
+========================= */
+
+button {
+  border: none;
+  border-radius: 10px;
+  padding: 10px 14px;
+  cursor: pointer;
+  background: var(--accent);
+  color: white;
+  font-weight: 600;
+}
+
+button.secondary {
+  background: #374151;
+}
+
+button:hover {
+  opacity: 0.9;
+}
+
+/* =========================
+   INPUTS
+========================= */
+
+input {
+  width: 100%;
+  padding: 10px;
+  border-radius: 10px;
+  border: none;
+  margin-top: 6px;
+  background: #111827;
+  color: white;
+}
+
+/* =========================
+   TEXT STYLES
+========================= */
+
+h1 {
+  margin-bottom: 8px;
+}
+
+h2 {
+  margin: 4px 0;
+}
+
+.hero-copy {
+  opacity: 0.8;
+}
+
+/* =========================
+   STATUS / PILLS
+========================= */
+
+.pill {
+  display: inline-block;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #1f2937;
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.answer-indicator.ready {
+  color: #22c55e;
+}
+
+.answer-indicator.waiting {
+  color: #9ca3af;
+}
+
+/* =========================
+   GRID
+========================= */
+
+.grid-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+/* =========================
+   OVERLAY (IMPORTANT)
+========================= */
+
 .overlay-frame {
   width: 100vw;
   height: 100vh;
   background: transparent !important;
   overflow: hidden;
   position: relative;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+/* =========================
+   LOWER THIRD STYLE
+========================= */
+
+.overlay-card {
+  min-width: 320px;
+  max-width: 600px;
+  margin-bottom: 40px;
+  padding: 16px 22px;
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.65);
+  border-left: 6px solid var(--accent);
+  backdrop-filter: blur(8px);
+  transform: translateY(120%);
+  transition: transform 0.4s ease;
+}
+
+.overlay-card.visible {
+  transform: translateY(0%);
+}
+
+.overlay-topline {
+  font-size: 14px;
+  opacity: 0.8;
+}
+
+.overlay-answer {
+  font-size: 22px;
+  font-weight: bold;
+}
+
+/* =========================
+   META TEXT
+========================= */
+
+.overlay-meta {
+  position: absolute;
+  bottom: 5px;
+  right: 10px;
+  font-size: 10px;
+  opacity: 0.5;
 }
