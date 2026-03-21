@@ -1,3 +1,12 @@
+useEffect(() => {
+  document.body.style.background = 'transparent';
+  document.documentElement.style.background = 'transparent';
+
+  return () => {
+    document.body.style.background = '';
+    document.documentElement.style.background = '';
+  };
+}, []);
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as Ably from 'ably';
 
