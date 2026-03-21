@@ -28,3 +28,6 @@ html:has(.overlay-frame),
 body:has(.overlay-frame) {
   background: transparent !important;
 }
+html, body {
+  background: transparent !important;
+}
