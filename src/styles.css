@@ -6,10 +6,7 @@
   --accent-rgb: 37, 99, 235;
 }
 
-body {
-  margin: 0;
-  color: #f5f7ff;
-}
+body { margin: 0; color: #f5f7ff; background: transparent; }
 
 /* Default background ONLY for non-overlay pages */
 .app-shell,
@@ -23,11 +20,10 @@ body {
 }
 
 /* 🔥 FORCE TRANSPARENCY FOR OVERLAY */
-.overlay-frame,
-html:has(.overlay-frame),
-body:has(.overlay-frame) {
+.overlay-frame {
+  width: 100vw;
+  height: 100vh;
   background: transparent !important;
-}
-html, body {
-  background: transparent !important;
+  overflow: hidden;
+  position: relative;
 }
