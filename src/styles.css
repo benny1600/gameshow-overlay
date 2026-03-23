@@ -139,73 +139,55 @@ h2 {
   background: transparent !important;
   overflow: hidden;
   position: relative;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
 }
-
-/* =========================
-   LOWER THIRD STYLE
-========================= */
 
 .overlay-card {
   position: absolute;
-  bottom: 0;
   left: 0;
+  right: 0;
+  bottom: 0;
 
   width: 100%;
-  min-height: 150px;
+  min-height: 140px;
 
   display: flex;
   flex-direction: column;
   justify-content: center;
   gap: 8px;
 
-  padding: 22px 42px 26px;
+  padding: 22px 40px;
 
-  background: linear-gradient(90deg, #000 0%, #111 55%, #161616 100%);
-  border-left: 14px solid var(--accent);
-  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  background: #000;
+  border-left: 12px solid var(--accent);
+  box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.65);
 
-  box-shadow:
-    0 -10px 40px rgba(0, 0, 0, 0.8),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.04),
-    inset 14px 0 28px rgba(var(--accent-rgb), 0.18);
+  visibility: hidden;
+}
 
-  transform: translateY(100%);
-  opacity: 1;
-  pointer-events: none;
-
-  transition: transform 0.4s ease, opacity 0.3s ease;
+.overlay-card.visible {
+  visibility: visible;
 }
 
 .overlay-topline {
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 700;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
   opacity: 0.9;
-  color: rgba(255, 255, 255, 0.88);
   text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
 }
 
 .overlay-answer {
-  font-size: 46px;
+  font-size: 40px;
   font-weight: 800;
   line-height: 1.05;
-  letter-spacing: 0.01em;
-  color: #fff;
-  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.95);
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.9);
 }
-
-/* =========================
-   META TEXT
-========================= */
 
 .overlay-meta {
   position: absolute;
-  bottom: 5px;
-  right: 10px;
+  right: 12px;
+  bottom: 6px;
   font-size: 10px;
-  opacity: 0.5;
+  opacity: 0.45;
 }
